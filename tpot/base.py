@@ -1300,7 +1300,7 @@ class TPOTBase(BaseEstimator):
 
         if output_file_name != "":
             with open(output_file_name, "w") as output_file:
-                print("---TPOT-Beta测试---")
+                print("---TPOT-Beta测了个试---")
                 output_file.write(to_write)
         else:
             return to_write
