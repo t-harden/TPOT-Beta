@@ -79,6 +79,7 @@ from .config.classifier_sparse import classifier_config_sparse
 from .config.classifier_nn import classifier_config_nn
 from .config.classifier_cuml import classifier_config_cuml
 from .config.regressor_cuml import regressor_config_cuml
+from .config.pre_config_test import tpot_pre_config_dict
 
 from .metrics import SCORERS
 from .gp_types import Output_Array
@@ -118,6 +119,9 @@ class TPOTBase(BaseEstimator):
         max_time_mins=None,
         max_eval_time_mins=5,
         random_state=None,
+
+        pre_config_dict=tpot_pre_config_dict,
+
         config_dict=None,
         template=None,
         warm_start=False,
@@ -311,6 +315,8 @@ class TPOTBase(BaseEstimator):
         self.random_state = random_state
         self.log_file = log_file
 
+        self.pre_config_dict = pre_config_dict
+
     def _setup_template(self, template):
         self.template = template
         if self.template is None:
@@ -449,7 +455,7 @@ class TPOTBase(BaseEstimator):
         if self.template == None:  # default pipeline structure
             step_in_type = np.ndarray
             step_ret_type = Output_Array
-            for operator in self.operators:
+            for operator in self.pre_operators:
                 arg_types = operator.parameter_types()[0][1:]
                 p_types = ([step_in_type] + arg_types, step_ret_type)
                 if operator.root:
@@ -486,7 +492,7 @@ class TPOTBase(BaseEstimator):
                         CombineDFs(), [step_in_type, step_in_type], step_in_type
                     )
                 elif main_type.count(step):  # if the step is a main type
-                    ops = [op for op in self.operators if op.type() == step]
+                    ops = [op for op in self.pre_operators if op.type() == step]
                     for operator in ops:
                         arg_types = operator.parameter_types()[0][1:]
                         p_types = ([step_in_type] + arg_types, step_ret_type)
@@ -495,7 +501,7 @@ class TPOTBase(BaseEstimator):
                 else:  # is the step is a specific operator or a wrong input
                     try:
                         operator = next(
-                            op for op in self.operators if op.__name__ == step
+                            op for op in self.pre_operators if op.__name__ == step
                         )
                     except:
                         raise ValueError(
@@ -507,7 +513,7 @@ class TPOTBase(BaseEstimator):
                     self._pset.addPrimitive(operator, *p_types)
                     self._import_hash_and_add_terminals(operator, arg_types)
         self.ret_types = [np.ndarray, Output_Array] + ret_types
-
+        #print("operator added")
     def _import_hash_and_add_terminals(self, operator, arg_types):
         if not self.op_list.count(operator.__name__):
             self._import_hash(operator)
@@ -590,13 +596,28 @@ class TPOTBase(BaseEstimator):
             self._last_optimized_pareto_front = None
             self._last_optimized_pareto_front_n_gens = 0
             self._setup_config(self.config_dict)
-
             self._setup_template(self.template)
 
             self.operators = []
             self.arguments = []
 
             make_pipeline_func = self._get_make_pipeline_func()
+
+            # 仿照构造self.operator的方法再构造一个self.pre_operators
+            self.pre_operators = []
+            self.pre_arguments = []
+
+            for key in sorted(self.pre_config_dict.keys()):
+                op_class, arg_types = TPOTOperatorClassFactory(
+                    key,
+                    self.pre_config_dict[key],
+                    BaseClass=Operator,
+                    ArgBaseClass=ARGType,
+                    verbose=self.verbosity,
+                )
+                if op_class:
+                    self.pre_operators.append(op_class)
+                    self.pre_arguments += arg_types
 
             for key in sorted(self._config_dict.keys()):
                 op_class, arg_types = TPOTOperatorClassFactory(
@@ -606,9 +627,13 @@ class TPOTBase(BaseEstimator):
                     ArgBaseClass=ARGType,
                     verbose=self.verbosity,
                 )
-                if op_class:
+                if op_class :
                     self.operators.append(op_class)
                     self.arguments += arg_types
+            #合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
+            # self.operators.extend(self.pre_operators)
+            # self.arguments += self.pre_arguments
+
             self.operators_context = {
                 "make_pipeline": make_pipeline_func,
                 "make_union": make_union,
