@@ -120,7 +120,7 @@ class TPOTBase(BaseEstimator):
         max_eval_time_mins=5,
         random_state=None,
 
-        pre_config_dict=tpot_pre_config_dict,
+        pre_config_dict=None,
 
         config_dict=None,
         template=None,
@@ -587,6 +587,21 @@ class TPOTBase(BaseEstimator):
 
         return make_pipeline_func
 
+    def get_union(self,attr1, attr2):
+        if isinstance(attr1, list) and isinstance(attr2, list):
+            # 如果两个属性都是列表，则取并集
+            result = list(set(attr1) | set(attr2))
+        elif isinstance(attr1, list) and isinstance(attr2, np.ndarray):
+            # 如果一个是列表，一个是np.ndarray，则将np.ndarray转换为列表，然后取并集
+            result = list(set(attr1) | set(attr2.tolist()))
+        elif isinstance(attr1, np.ndarray) and isinstance(attr2, list):
+            # 如果一个是np.ndarray，一个是列表，则将np.ndarray转换为列表，然后取并集
+            result = list(set(attr1.tolist()) | set(attr2))
+            #两个都是np.ndarray
+        elif isinstance(attr1, np.ndarray) and isinstance(attr2, np.ndarray):
+            result = np.unique(np.concatenate((attr1, attr2)))
+        return result
+
     def _fit_init(self):
         # initialization for fit function
 
@@ -603,6 +618,27 @@ class TPOTBase(BaseEstimator):
 
             make_pipeline_func = self._get_make_pipeline_func()
 
+           # 仿照构造self.operator的方法再构造一个self.pre_operators
+            self.pre_operators = []
+            self.pre_arguments = []
+            # 合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
+            for key in sorted(self.pre_config_dict.keys()):
+                if key not in self._config_dict.keys():
+                    self._config_dict[key] = self.pre_config_dict[key]
+                else:
+                    for attr in self._config_dict[key].keys():
+                        self._config_dict[key][attr] = self.get_union(self._config_dict[key][attr],self.pre_config_dict[key][attr])
+                op_class, arg_types = TPOTOperatorClassFactory(
+                    key,
+                    self.pre_config_dict[key],
+                    BaseClass=Operator,
+                    ArgBaseClass=ARGType,
+                    verbose=self.verbosity,
+                )
+                if op_class:
+                    self.pre_operators.append(op_class)
+                    self.pre_arguments += arg_types
+            #再根据更新后的_config_dict创建搜索空间
             for key in sorted(self._config_dict.keys()):
                 op_class, arg_types = TPOTOperatorClassFactory(
                     key,
@@ -614,36 +650,8 @@ class TPOTBase(BaseEstimator):
                 if op_class :
                     self.operators.append(op_class)
                     self.arguments += arg_types
-            #合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
-            # self.operators.extend(self.pre_operators)
-            # self.arguments += self.pre_arguments
-            print(self.operators)
-            print(self.arguments)
-            # 仿照构造self.operator的方法再构造一个self.pre_operators
-            self.pre_operators = []
-            self.pre_arguments = []
-
-            for key in sorted(self.pre_config_dict.keys()):
-                op_class, arg_types = TPOTOperatorClassFactory(
-                    key,
-                    self.pre_config_dict[key],
-                    BaseClass=Operator,
-                    ArgBaseClass=ARGType,
-                    verbose=self.verbosity,
-                )
-                if op_class:
-                    self.pre_operators.append(op_class)
-                    self.pre_arguments += arg_types
-                    op_class_str = str(op_class)
-                    if op_class_str not in [str(existing_op) for existing_op in self.operators]:
-                        self.operators.append(op_class)
-                        self.arguments += arg_types
 
 
-            print(self.pre_operators)
-            print(self.pre_arguments)
-            print(self.operators)
-            print(self.arguments)
             self.operators_context = {
                 "make_pipeline": make_pipeline_func,
                 "make_union": make_union,
