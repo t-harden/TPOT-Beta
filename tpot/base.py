@@ -603,6 +603,22 @@ class TPOTBase(BaseEstimator):
 
             make_pipeline_func = self._get_make_pipeline_func()
 
+            for key in sorted(self._config_dict.keys()):
+                op_class, arg_types = TPOTOperatorClassFactory(
+                    key,
+                    self._config_dict[key],
+                    BaseClass=Operator,
+                    ArgBaseClass=ARGType,
+                    verbose=self.verbosity,
+                )
+                if op_class :
+                    self.operators.append(op_class)
+                    self.arguments += arg_types
+            #合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
+            # self.operators.extend(self.pre_operators)
+            # self.arguments += self.pre_arguments
+            print(self.operators)
+            print(self.arguments)
             # 仿照构造self.operator的方法再构造一个self.pre_operators
             self.pre_operators = []
             self.pre_arguments = []
@@ -618,22 +634,16 @@ class TPOTBase(BaseEstimator):
                 if op_class:
                     self.pre_operators.append(op_class)
                     self.pre_arguments += arg_types
+                    op_class_str = str(op_class)
+                    if op_class_str not in [str(existing_op) for existing_op in self.operators]:
+                        self.operators.append(op_class)
+                        self.arguments += arg_types
 
-            for key in sorted(self._config_dict.keys()):
-                op_class, arg_types = TPOTOperatorClassFactory(
-                    key,
-                    self._config_dict[key],
-                    BaseClass=Operator,
-                    ArgBaseClass=ARGType,
-                    verbose=self.verbosity,
-                )
-                if op_class :
-                    self.operators.append(op_class)
-                    self.arguments += arg_types
-            #合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
-            # self.operators.extend(self.pre_operators)
-            # self.arguments += self.pre_arguments
 
+            print(self.pre_operators)
+            print(self.pre_arguments)
+            print(self.operators)
+            print(self.arguments)
             self.operators_context = {
                 "make_pipeline": make_pipeline_func,
                 "make_union": make_union,
