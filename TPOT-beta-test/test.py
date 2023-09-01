@@ -24,7 +24,7 @@ tpot_pre_config_dict = {
 
     'sklearn.naive_bayes.BernoulliNB': {
         'alpha': [1e-4, 1e-3, 1e-2, 1e-1, 1., 10., 100.],
-        'fit_prior': [True, False]
+        'fit_prior': [True]
     },
 
     'sklearn.neural_network.MLPClassifier': {
