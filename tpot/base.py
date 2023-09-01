@@ -455,7 +455,7 @@ class TPOTBase(BaseEstimator):
         if self.template == None:  # default pipeline structure
             step_in_type = np.ndarray
             step_ret_type = Output_Array
-            for operator in self.pre_operators:
+            for operator in self.pre_operators: # self.operators改成self.pre_operators
                 arg_types = operator.parameter_types()[0][1:]
                 p_types = ([step_in_type] + arg_types, step_ret_type)
                 if operator.root:
@@ -492,7 +492,7 @@ class TPOTBase(BaseEstimator):
                         CombineDFs(), [step_in_type, step_in_type], step_in_type
                     )
                 elif main_type.count(step):  # if the step is a main type
-                    ops = [op for op in self.pre_operators if op.type() == step]
+                    ops = [op for op in self.pre_operators if op.type() == step] # self.operators改成self.pre_operators
                     for operator in ops:
                         arg_types = operator.parameter_types()[0][1:]
                         p_types = ([step_in_type] + arg_types, step_ret_type)
@@ -501,7 +501,7 @@ class TPOTBase(BaseEstimator):
                 else:  # is the step is a specific operator or a wrong input
                     try:
                         operator = next(
-                            op for op in self.pre_operators if op.__name__ == step
+                            op for op in self.pre_operators if op.__name__ == step # self.operators改成self.pre_operators
                         )
                     except:
                         raise ValueError(
@@ -587,7 +587,7 @@ class TPOTBase(BaseEstimator):
 
         return make_pipeline_func
 
-    def get_union(self,attr1, attr2):
+    def get_union(self, attr1, attr2):
         if isinstance(attr1, list) and isinstance(attr2, list):
             # 如果两个属性都是列表，则取并集
             result = list(set(attr1) | set(attr2))
@@ -618,7 +618,7 @@ class TPOTBase(BaseEstimator):
 
             make_pipeline_func = self._get_make_pipeline_func()
 
-           # 仿照构造self.operator的方法再构造一个self.pre_operators
+           # 仿照构造self.operators的方法再构造一个self.pre_operators
             self.pre_operators = []
             self.pre_arguments = []
             # 合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
@@ -659,6 +659,11 @@ class TPOTBase(BaseEstimator):
                 "FunctionTransformer": FunctionTransformer,
                 "copy": copy,
             }
+
+            #ToDo:这里是测试！注意！（以后开发也要有这个意识）
+            print("###", self._config_dict)
+            print('---', self.pre_config_dict)
+
             self._setup_pset()
             self._setup_toolbox()
             # Dictionary of individuals that have already been evaluated in previous
