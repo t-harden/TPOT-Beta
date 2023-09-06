@@ -700,7 +700,7 @@ class TPOTBase(BaseEstimator):
         #     result = np.unique(np.concatenate((attr1, attr2)))
         elif isinstance(attr1,None):
             result = attr2
-        elif isinstance(attr1,dict):
+        # elif isinstance(attr1,dict):
 
         return result
 
