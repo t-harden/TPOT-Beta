@@ -33,7 +33,7 @@ tpot_pre_config_dict = {
     # 'sklearn.preprocessing.Binarizer': {
     #     'threshold': np.arange(0.0, 1.01, 0.05)
     # },
-    #
+
     # 'sklearn.decomposition.FastICA': {
     #     'tol': np.arange(0.0, 1.01, 0.05)
     # },
@@ -45,7 +45,7 @@ tpot_pre_config_dict = {
     #
     # 'sklearn.preprocessing.MaxAbsScaler': {
     # },
-    #
+
     # 'sklearn.preprocessing.MinMaxScaler': {
     # },
     #
@@ -73,7 +73,7 @@ tpot_pre_config_dict = {
     # 'sklearn.kernel_approximation.RBFSampler': {
     #     'gamma': np.arange(0.0, 1.01, 0.05)
     # },
-    #
+
     # 'sklearn.preprocessing.RobustScaler': {
     # },
     #

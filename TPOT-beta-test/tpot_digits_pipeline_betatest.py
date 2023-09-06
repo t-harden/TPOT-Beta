@@ -11,10 +11,10 @@ features = tpot_data.drop('target', axis=1)
 training_features, testing_features, training_target, testing_target = \
             train_test_split(features, tpot_data['target'], random_state=None)
 
-# Average CV score on the training set was: 0.8485722153380145
+# Average CV score on the training set was: 0.850799944926339
 exported_pipeline = make_pipeline(
-    StackingEstimator(estimator=BernoulliNB(alpha=1.0, fit_prior=False)),
-    BernoulliNB(alpha=0.1, fit_prior=False)
+    StackingEstimator(estimator=BernoulliNB(alpha=1.0, fit_prior=True)),
+    BernoulliNB(alpha=0.1, fit_prior=True)
 )
 
 exported_pipeline.fit(training_features, training_target)

@@ -434,6 +434,21 @@ class TPOTBase(BaseEstimator):
                 "{}".format(config_path)
             )
 
+    def _setup_pre_pset(self):
+        if self.random_state is not None:
+            random.seed(self.random_state)
+            np.random.seed(self.random_state)
+
+        self._pre_pset = gp.PrimitiveSetTyped("MAIN", [np.ndarray], Output_Array)
+        self._pre_pset.renameArguments(ARG0="input_matrix")
+        self._add_pre_operators()
+
+        if self.verbosity > 2:
+            print(
+                "{} operators have been imported by TPOT.".format(len(self.operators))
+            )
+
+
     def _setup_pset(self):
         if self.random_state is not None:
             random.seed(self.random_state)
@@ -448,7 +463,7 @@ class TPOTBase(BaseEstimator):
                 "{} operators have been imported by TPOT.".format(len(self.operators))
             )
 
-    def _add_operators(self):
+    def _add_pre_operators(self):
         main_type = ["Classifier", "Regressor", "Selector", "Transformer"]
         ret_types = []
         self.op_list = []
@@ -456,6 +471,75 @@ class TPOTBase(BaseEstimator):
             step_in_type = np.ndarray
             step_ret_type = Output_Array
             for operator in self.pre_operators: # self.operators改成self.pre_operators
+                arg_types = operator.parameter_types()[0][1:]
+                p_types = ([step_in_type] + arg_types, step_ret_type)
+                if operator.root:
+                    # We need to add rooted primitives twice so that they can
+                    # return both an Output_Array (and thus be the root of the tree),
+                    # and return a np.ndarray so they can exist elsewhere in the tree.
+                    self._pre_pset.addPrimitive(operator, *p_types)
+                tree_p_types = ([step_in_type] + arg_types, step_in_type)
+                self._pre_pset.addPrimitive(operator, *tree_p_types)
+                self._pre_import_hash_and_add_terminals(operator, arg_types)
+            self._pre_pset.addPrimitive(
+                CombineDFs(), [step_in_type, step_in_type], step_in_type
+            )
+        else:
+            gp_types = {}
+            for idx, step in enumerate(self._template_comp):
+
+                # input class in each step
+                if idx:
+                    step_in_type = ret_types[-1]
+                else:
+                    step_in_type = np.ndarray
+                if step != "CombineDFs":
+                    if idx < len(self._template_comp) - 1:
+                        # create an empty for returning class for strongly-type GP
+                        step_ret_type_name = "Ret_{}".format(idx)
+                        step_ret_type = type(step_ret_type_name, (object,), {})
+                        ret_types.append(step_ret_type)
+                    else:
+                        step_ret_type = Output_Array
+                check_template = True
+                if step == "CombineDFs":
+                    self._pre_pset.addPrimitive(
+                        CombineDFs(), [step_in_type, step_in_type], step_in_type
+                    )
+                elif main_type.count(step):  # if the step is a main type
+                    ops = [op for op in self.pre_operators if op.type() == step] # self.operators改成self.pre_operators
+                    for operator in ops:
+                        arg_types = operator.parameter_types()[0][1:]
+                        p_types = ([step_in_type] + arg_types, step_ret_type)
+                        self._pre_pset.addPrimitive(operator, *p_types)
+                        self._pre_import_hash_and_add_terminals(operator, arg_types)
+                else:  # is the step is a specific operator or a wrong input
+                    try:
+                        operator = next(
+                            op for op in self.pre_operators if op.__name__ == step # self.operators改成self.pre_operators
+                        )
+                    except:
+                        raise ValueError(
+                            "An error occured while attempting to read the specified "
+                            "template. Please check a step named {}".format(step)
+                        )
+                    arg_types = operator.parameter_types()[0][1:]
+                    p_types = ([step_in_type] + arg_types, step_ret_type)
+                    self._pre_pset.addPrimitive(operator, *p_types)
+                    self._pre_import_hash_and_add_terminals(operator, arg_types)
+        self.ret_types = [np.ndarray, Output_Array] + ret_types
+        #print("operator added")
+
+
+
+    def _add_operators(self):
+        main_type = ["Classifier", "Regressor", "Selector", "Transformer"]
+        ret_types = []
+        self.op_list = []
+        if self.template == None:  # default pipeline structure
+            step_in_type = np.ndarray
+            step_ret_type = Output_Array
+            for operator in self.operators: # self.operators改成self.pre_operators
                 arg_types = operator.parameter_types()[0][1:]
                 p_types = ([step_in_type] + arg_types, step_ret_type)
                 if operator.root:
@@ -492,7 +576,7 @@ class TPOTBase(BaseEstimator):
                         CombineDFs(), [step_in_type, step_in_type], step_in_type
                     )
                 elif main_type.count(step):  # if the step is a main type
-                    ops = [op for op in self.pre_operators if op.type() == step] # self.operators改成self.pre_operators
+                    ops = [op for op in self.operators if op.type() == step] # self.operators改成self.pre_operators
                     for operator in ops:
                         arg_types = operator.parameter_types()[0][1:]
                         p_types = ([step_in_type] + arg_types, step_ret_type)
@@ -501,7 +585,7 @@ class TPOTBase(BaseEstimator):
                 else:  # is the step is a specific operator or a wrong input
                     try:
                         operator = next(
-                            op for op in self.pre_operators if op.__name__ == step # self.operators改成self.pre_operators
+                            op for op in self.operators if op.__name__ == step # self.operators改成self.pre_operators
                         )
                     except:
                         raise ValueError(
@@ -513,11 +597,16 @@ class TPOTBase(BaseEstimator):
                     self._pset.addPrimitive(operator, *p_types)
                     self._import_hash_and_add_terminals(operator, arg_types)
         self.ret_types = [np.ndarray, Output_Array] + ret_types
-        #print("operator added")
     def _import_hash_and_add_terminals(self, operator, arg_types):
         if not self.op_list.count(operator.__name__):
             self._import_hash(operator)
             self._add_terminals(arg_types)
+            self.op_list.append(operator.__name__)
+
+    def _pre_import_hash_and_add_terminals(self, operator, arg_types):
+        if not self.op_list.count(operator.__name__):
+            self._import_hash(operator)
+            self._add_pre_terminals(arg_types)
             self.op_list.append(operator.__name__)
 
     def _import_hash(self, operator):
@@ -542,6 +631,15 @@ class TPOTBase(BaseEstimator):
                 terminal_name = _type.__name__ + "=" + str(val)
                 self._pset.addTerminal(val, _type, name=terminal_name)
 
+
+    def _add_pre_terminals(self, arg_types):
+        for _type in arg_types:
+            type_values = list(_type.values)
+
+            for val in type_values:
+                terminal_name = _type.__name__ + "=" + str(val)
+                self._pre_pset.addTerminal(val, _type, name=terminal_name)
+
     def _setup_toolbox(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -555,7 +653,7 @@ class TPOTBase(BaseEstimator):
 
         self._toolbox = base.Toolbox()
         self._toolbox.register(
-            "expr", self._gen_grow_safe, pset=self._pset, min_=self._min, max_=self._max
+            "expr", self._gen_grow_safe, pset=self._pre_pset, min_=self._min, max_=self._max
         )
         self._toolbox.register(
             "individual", tools.initIterate, creator.Individual, self._toolbox.expr
@@ -587,19 +685,23 @@ class TPOTBase(BaseEstimator):
 
         return make_pipeline_func
 
-    def get_union(self, attr1, attr2):
+    def _get_union(self, attr1, attr2):
         if isinstance(attr1, list) and isinstance(attr2, list):
             # 如果两个属性都是列表，则取并集
             result = list(set(attr1) | set(attr2))
-        elif isinstance(attr1, list) and isinstance(attr2, np.ndarray):
-            # 如果一个是列表，一个是np.ndarray，则将np.ndarray转换为列表，然后取并集
-            result = list(set(attr1) | set(attr2.tolist()))
+        # elif isinstance(attr1, list) and isinstance(attr2, np.ndarray):
+        #     # 如果一个是列表，一个是np.ndarray，则将np.ndarray转换为列表，然后取并集
+        #     result = list(set(attr1) | set(attr2.tolist()))
         elif isinstance(attr1, np.ndarray) and isinstance(attr2, list):
             # 如果一个是np.ndarray，一个是列表，则将np.ndarray转换为列表，然后取并集
             result = list(set(attr1.tolist()) | set(attr2))
             #两个都是np.ndarray
-        elif isinstance(attr1, np.ndarray) and isinstance(attr2, np.ndarray):
-            result = np.unique(np.concatenate((attr1, attr2)))
+        # elif isinstance(attr1, np.ndarray) and isinstance(attr2, np.ndarray):
+        #     result = np.unique(np.concatenate((attr1, attr2)))
+        elif isinstance(attr1,None):
+            result = attr2
+        elif isinstance(attr1,dict):
+
         return result
 
     def _fit_init(self):
@@ -627,7 +729,7 @@ class TPOTBase(BaseEstimator):
                     self._config_dict[key] = self.pre_config_dict[key]
                 else:
                     for attr in self._config_dict[key].keys():
-                        self._config_dict[key][attr] = self.get_union(self._config_dict[key][attr],self.pre_config_dict[key][attr])
+                        self._config_dict[key][attr] = self._get_union(self._config_dict[key][attr],self.pre_config_dict[key][attr])
                 op_class, arg_types = TPOTOperatorClassFactory(
                     key,
                     self.pre_config_dict[key],
@@ -664,6 +766,7 @@ class TPOTBase(BaseEstimator):
             print("###", self._config_dict)
             print('---', self.pre_config_dict)
 
+            self._setup_pre_pset()
             self._setup_pset()
             self._setup_toolbox()
             # Dictionary of individuals that have already been evaluated in previous
