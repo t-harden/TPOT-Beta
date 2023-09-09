@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.naive_bayes import BernoulliNB
+from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import make_pipeline, make_union
 from tpot.builtins import StackingEstimator
 
@@ -11,10 +11,10 @@ features = tpot_data.drop('target', axis=1)
 training_features, testing_features, training_target, testing_target = \
             train_test_split(features, tpot_data['target'], random_state=None)
 
-# Average CV score on the training set was: 0.850799944926339
+# Average CV score on the training set was: 0.9019964202120336
 exported_pipeline = make_pipeline(
-    StackingEstimator(estimator=BernoulliNB(alpha=1.0, fit_prior=True)),
-    BernoulliNB(alpha=0.1, fit_prior=True)
+    StackingEstimator(estimator=MultinomialNB(alpha=0.1, fit_prior=False)),
+    MultinomialNB(alpha=100.0, fit_prior=True)
 )
 
 exported_pipeline.fit(training_features, training_target)

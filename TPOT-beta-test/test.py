@@ -118,10 +118,10 @@ tpot_config = {
     #     'alpha': [1e-4, 1e-3, 1e-2, 1e-1],
     #     'learning_rate_init': [1e-3, 1e-2, 1e-1, 0.5, 1.]
     # },
-    # 'sklearn.naive_bayes.MultinomialNB': {
-    #     'alpha': [1e-3, 1e-2, 1e-1, 1., 10., 100.],
-    #     'fit_prior': [True, False]
-    # },
+    'sklearn.naive_bayes.MultinomialNB': {
+        'alpha': [1e-3, 1e-2, 1e-1, 1., 10., 100.],
+        'fit_prior': [True, False]
+    },
     # 'sklearn.feature_selection.SelectPercentile': {
     #     'percentile': range(1, 100),
     #     'score_func': {

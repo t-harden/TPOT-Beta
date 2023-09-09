@@ -434,21 +434,6 @@ class TPOTBase(BaseEstimator):
                 "{}".format(config_path)
             )
 
-    def _setup_pre_pset(self):
-        if self.random_state is not None:
-            random.seed(self.random_state)
-            np.random.seed(self.random_state)
-
-        self._pre_pset = gp.PrimitiveSetTyped("MAIN", [np.ndarray], Output_Array)
-        self._pre_pset.renameArguments(ARG0="input_matrix")
-        self._add_pre_operators()
-
-        if self.verbosity > 2:
-            print(
-                "{} operators have been imported by TPOT.".format(len(self.operators))
-            )
-
-
     def _setup_pset(self):
         if self.random_state is not None:
             random.seed(self.random_state)
@@ -463,7 +448,87 @@ class TPOTBase(BaseEstimator):
                 "{} operators have been imported by TPOT.".format(len(self.operators))
             )
 
-    def _add_pre_operators(self):
+    def _setup_pre_pset(self):  #仿写下面的_setup_pset()函数
+        if self.random_state is not None:
+            random.seed(self.random_state)
+            np.random.seed(self.random_state)
+
+        self._pre_pset = gp.PrimitiveSetTyped("MAIN", [np.ndarray], Output_Array)
+        self._pre_pset.renameArguments(ARG0="input_matrix")
+        self._add_pre_operators()
+
+        if self.verbosity > 2:
+            print(
+                "{} operators have been imported by TPOT.".format(len(self.operators))
+            )
+
+    def _add_operators(self):
+        main_type = ["Classifier", "Regressor", "Selector", "Transformer"]
+        ret_types = []
+        self.op_list = []
+        if self.template == None:  # default pipeline structure
+            step_in_type = np.ndarray
+            step_ret_type = Output_Array
+            for operator in self.operators:
+                arg_types = operator.parameter_types()[0][1:]
+                p_types = ([step_in_type] + arg_types, step_ret_type)
+                if operator.root:
+                    # We need to add rooted primitives twice so that they can
+                    # return both an Output_Array (and thus be the root of the tree),
+                    # and return a np.ndarray so they can exist elsewhere in the tree.
+                    self._pset.addPrimitive(operator, *p_types)
+                tree_p_types = ([step_in_type] + arg_types, step_in_type)
+                self._pset.addPrimitive(operator, *tree_p_types)
+                self._import_hash_and_add_terminals(operator, arg_types)
+            self._pset.addPrimitive(
+                CombineDFs(), [step_in_type, step_in_type], step_in_type
+            )
+        else:
+            gp_types = {}
+            for idx, step in enumerate(self._template_comp):
+
+                # input class in each step
+                if idx:
+                    step_in_type = ret_types[-1]
+                else:
+                    step_in_type = np.ndarray
+                if step != "CombineDFs":
+                    if idx < len(self._template_comp) - 1:
+                        # create an empty for returning class for strongly-type GP
+                        step_ret_type_name = "Ret_{}".format(idx)
+                        step_ret_type = type(step_ret_type_name, (object,), {})
+                        ret_types.append(step_ret_type)
+                    else:
+                        step_ret_type = Output_Array
+                check_template = True
+                if step == "CombineDFs":
+                    self._pset.addPrimitive(
+                        CombineDFs(), [step_in_type, step_in_type], step_in_type
+                    )
+                elif main_type.count(step):  # if the step is a main type
+                    ops = [op for op in self.operators if op.type() == step]
+                    for operator in ops:
+                        arg_types = operator.parameter_types()[0][1:]
+                        p_types = ([step_in_type] + arg_types, step_ret_type)
+                        self._pset.addPrimitive(operator, *p_types)
+                        self._import_hash_and_add_terminals(operator, arg_types)
+                else:  # is the step is a specific operator or a wrong input
+                    try:
+                        operator = next(
+                            op for op in self.operators if op.__name__ == step
+                        )
+                    except:
+                        raise ValueError(
+                            "An error occured while attempting to read the specified "
+                            "template. Please check a step named {}".format(step)
+                        )
+                    arg_types = operator.parameter_types()[0][1:]
+                    p_types = ([step_in_type] + arg_types, step_ret_type)
+                    self._pset.addPrimitive(operator, *p_types)
+                    self._import_hash_and_add_terminals(operator, arg_types)
+        self.ret_types = [np.ndarray, Output_Array] + ret_types
+
+    def _add_pre_operators(self): #仿写下面的_add_operators()函数
         main_type = ["Classifier", "Regressor", "Selector", "Transformer"]
         ret_types = []
         self.op_list = []
@@ -530,73 +595,6 @@ class TPOTBase(BaseEstimator):
         self.ret_types = [np.ndarray, Output_Array] + ret_types
         #print("operator added")
 
-
-
-    def _add_operators(self):
-        main_type = ["Classifier", "Regressor", "Selector", "Transformer"]
-        ret_types = []
-        self.op_list = []
-        if self.template == None:  # default pipeline structure
-            step_in_type = np.ndarray
-            step_ret_type = Output_Array
-            for operator in self.operators: # self.operators改成self.pre_operators
-                arg_types = operator.parameter_types()[0][1:]
-                p_types = ([step_in_type] + arg_types, step_ret_type)
-                if operator.root:
-                    # We need to add rooted primitives twice so that they can
-                    # return both an Output_Array (and thus be the root of the tree),
-                    # and return a np.ndarray so they can exist elsewhere in the tree.
-                    self._pset.addPrimitive(operator, *p_types)
-                tree_p_types = ([step_in_type] + arg_types, step_in_type)
-                self._pset.addPrimitive(operator, *tree_p_types)
-                self._import_hash_and_add_terminals(operator, arg_types)
-            self._pset.addPrimitive(
-                CombineDFs(), [step_in_type, step_in_type], step_in_type
-            )
-        else:
-            gp_types = {}
-            for idx, step in enumerate(self._template_comp):
-
-                # input class in each step
-                if idx:
-                    step_in_type = ret_types[-1]
-                else:
-                    step_in_type = np.ndarray
-                if step != "CombineDFs":
-                    if idx < len(self._template_comp) - 1:
-                        # create an empty for returning class for strongly-type GP
-                        step_ret_type_name = "Ret_{}".format(idx)
-                        step_ret_type = type(step_ret_type_name, (object,), {})
-                        ret_types.append(step_ret_type)
-                    else:
-                        step_ret_type = Output_Array
-                check_template = True
-                if step == "CombineDFs":
-                    self._pset.addPrimitive(
-                        CombineDFs(), [step_in_type, step_in_type], step_in_type
-                    )
-                elif main_type.count(step):  # if the step is a main type
-                    ops = [op for op in self.operators if op.type() == step] # self.operators改成self.pre_operators
-                    for operator in ops:
-                        arg_types = operator.parameter_types()[0][1:]
-                        p_types = ([step_in_type] + arg_types, step_ret_type)
-                        self._pset.addPrimitive(operator, *p_types)
-                        self._import_hash_and_add_terminals(operator, arg_types)
-                else:  # is the step is a specific operator or a wrong input
-                    try:
-                        operator = next(
-                            op for op in self.operators if op.__name__ == step # self.operators改成self.pre_operators
-                        )
-                    except:
-                        raise ValueError(
-                            "An error occured while attempting to read the specified "
-                            "template. Please check a step named {}".format(step)
-                        )
-                    arg_types = operator.parameter_types()[0][1:]
-                    p_types = ([step_in_type] + arg_types, step_ret_type)
-                    self._pset.addPrimitive(operator, *p_types)
-                    self._import_hash_and_add_terminals(operator, arg_types)
-        self.ret_types = [np.ndarray, Output_Array] + ret_types
     def _import_hash_and_add_terminals(self, operator, arg_types):
         if not self.op_list.count(operator.__name__):
             self._import_hash(operator)
@@ -630,7 +628,6 @@ class TPOTBase(BaseEstimator):
             for val in type_values:
                 terminal_name = _type.__name__ + "=" + str(val)
                 self._pset.addTerminal(val, _type, name=terminal_name)
-
 
     def _add_pre_terminals(self, arg_types):
         for _type in arg_types:
@@ -720,7 +717,7 @@ class TPOTBase(BaseEstimator):
 
             make_pipeline_func = self._get_make_pipeline_func()
 
-           # 仿照构造self.operators的方法再构造一个self.pre_operators
+            "仿照构造self.operators的方法再构造一个self.pre_operators，并且更新_config_dict（用合并的字典）"
             self.pre_operators = []
             self.pre_arguments = []
             # 合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
@@ -740,7 +737,8 @@ class TPOTBase(BaseEstimator):
                 if op_class:
                     self.pre_operators.append(op_class)
                     self.pre_arguments += arg_types
-            #再根据更新后的_config_dict创建搜索空间
+
+            "再根据更新后的_config_dict构造self.operators"
             for key in sorted(self._config_dict.keys()):
                 op_class, arg_types = TPOTOperatorClassFactory(
                     key,
