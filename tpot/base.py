@@ -592,7 +592,7 @@ class TPOTBase(BaseEstimator):
                     p_types = ([step_in_type] + arg_types, step_ret_type)
                     self._pre_pset.addPrimitive(operator, *p_types)
                     self._pre_import_hash_and_add_terminals(operator, arg_types)
-        self.ret_types = [np.ndarray, Output_Array] + ret_types
+        self.pre_ret_types = [np.ndarray, Output_Array] + ret_types
         #print("operator added")
 
     def _import_hash_and_add_terminals(self, operator, arg_types):
@@ -650,7 +650,7 @@ class TPOTBase(BaseEstimator):
 
         self._toolbox = base.Toolbox()
         self._toolbox.register(
-            "expr", self._gen_grow_safe, pset=self._pre_pset, min_=self._min, max_=self._max
+            "expr", self._gen_grow_safe, pset=self._pre_pset, ret_types=self.pre_ret_types, min_=self._min, max_=self._max
         )
         self._toolbox.register(
             "individual", tools.initIterate, creator.Individual, self._toolbox.expr
@@ -663,11 +663,11 @@ class TPOTBase(BaseEstimator):
         self._toolbox.register("mate", self._mate_operator)
         if self.tree_structure:
             self._toolbox.register(
-                "expr_mut", self._gen_grow_safe, min_=self._min, max_=self._max + 1
+                "expr_mut", self._gen_grow_safe, ret_types=self.ret_types, min_=self._min, max_=self._max + 1
             )
         else:
             self._toolbox.register(
-                "expr_mut", self._gen_grow_safe, min_=self._min, max_=self._max
+                "expr_mut", self._gen_grow_safe, ret_types=self.ret_types, min_=self._min, max_=self._max
             )
         self._toolbox.register("mutate", self._random_mutation_operator)
 
@@ -2034,7 +2034,7 @@ class TPOTBase(BaseEstimator):
 
         return (offspring,)
 
-    def _gen_grow_safe(self, pset, min_, max_, type_=None):
+    def _gen_grow_safe(self, pset, ret_types, min_, max_, type_=None):
         """Generate an expression where each leaf might have a different depth between min_ and max_.
 
         Parameters
@@ -2055,11 +2055,11 @@ class TPOTBase(BaseEstimator):
             A grown tree with leaves at possibly different depths.
         """
 
-        def condition(height, depth, type_):
+        def condition(height, depth, ret_types, type_):
             """Stop when the depth is equal to height or when a node should be a terminal."""
-            return type_ not in self.ret_types or depth == height
+            return type_ not in ret_types or depth == height
 
-        return self._generate(pset, min_, max_, condition, type_)
+        return self._generate(pset, ret_types, min_, max_, condition, type_)
 
     def _operator_count(self, individual):
         """Count the number of pipeline operators as a measure of pipeline complexity.
@@ -2110,7 +2110,7 @@ class TPOTBase(BaseEstimator):
         return result_score_list
 
     @_pre_test
-    def _generate(self, pset, min_, max_, condition, type_=None):
+    def _generate(self, pset, ret_types, min_, max_, condition, type_=None):
         """Generate a Tree as a list of lists.
 
         The tree is build from the root to the leaves, and it stop growing when
@@ -2147,7 +2147,7 @@ class TPOTBase(BaseEstimator):
             depth, type_ = stack.pop()
 
             # We've added a type_ parameter to the condition function
-            if condition(height, depth, type_):
+            if condition(height, depth, ret_types, type_):
                 try:
                     term = np.random.choice(pset.terminals[type_])
                 except IndexError:
