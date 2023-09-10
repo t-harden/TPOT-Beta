@@ -627,6 +627,7 @@ class TPOTBase(BaseEstimator):
 
             for val in type_values:
                 terminal_name = _type.__name__ + "=" + str(val)
+                print("terminal_name: ", terminal_name)
                 self._pset.addTerminal(val, _type, name=terminal_name)
 
     def _add_pre_terminals(self, arg_types):
@@ -770,6 +771,11 @@ class TPOTBase(BaseEstimator):
             # Dictionary of individuals that have already been evaluated in previous
             # generations or previous runs
             self.evaluated_individuals_ = {}
+
+            print(len(self._pset.primitives), "self._pset.primitives:", self._pset.primitives)
+            print(len(self._pset.terminals), "self._pset.terminals:", self._pset.terminals)
+            print(len(self._pre_pset.primitives), "self._pre_pset.primitives:", self._pre_pset.primitives)
+            print(len(self._pre_pset.terminals), "self._pre_pset.terminals:", self._pre_pset.terminals)
 
         self._optimized_pipeline = None
         self._optimized_pipeline_score = None
