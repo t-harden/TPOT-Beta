@@ -683,22 +683,55 @@ class TPOTBase(BaseEstimator):
 
         return make_pipeline_func
 
-    def _get_union(self, attr1, attr2):
+    def _get_union(attr1, attr2):
+        # 如果两个属性都是列表，则取并集即可
         if isinstance(attr1, list) and isinstance(attr2, list):
-            # 如果两个属性都是列表，则取并集
             result = list(set(attr1) | set(attr2))
-        # elif isinstance(attr1, list) and isinstance(attr2, np.ndarray):
+
         #     # 如果一个是列表，一个是np.ndarray，则将np.ndarray转换为列表，然后取并集
+        #     # 但是考虑到我们自定义生成operators的方式，这样的情况应该是不存在的，先注释掉
+        # elif isinstance(attr1, list) and isinstance(attr2, np.ndarray):
         #     result = list(set(attr1) | set(attr2.tolist()))
+
+        # 如果一个是np.ndarray，一个是列表，则将np.ndarray转换为列表，然后取并集
         elif isinstance(attr1, np.ndarray) and isinstance(attr2, list):
-            # 如果一个是np.ndarray，一个是列表，则将np.ndarray转换为列表，然后取并集
             result = list(set(attr1.tolist()) | set(attr2))
-            #两个都是np.ndarray
-        # elif isinstance(attr1, np.ndarray) and isinstance(attr2, np.ndarray):
-        #     result = np.unique(np.concatenate((attr1, attr2)))
-        elif isinstance(attr1,None):
+            # 再把形式转换成attr1的，即ndarray类型
+            result = np.array(result)
+
+        elif isinstance(attr1, range) and isinstance(attr2, list):
+            result = list(set(list(attr1)) | set(attr2))
+            # 将list类型转换成range类型再返回
+            min_value = min(result)
+            max_value = max(result)
+            result = range(min_value, max_value + 1)
+
+        # 合并字典（我直接默认attr1和attr2的字典结构完全相同了），使用递归方法
+        elif isinstance(attr1, dict) and isinstance(attr2, dict):
+            result = {}
+            for key in attr1.keys():
+                # if isinstance(attr1[key],dict):
+                result[key] = _get_union(attr1[key], attr2[key])
+
+
+        # 虽说统计得到的类型中没有None，但是递归时可能遇到这种情况
+        elif attr1 is None:
             result = attr2
-        # elif isinstance(attr1,dict):
+        elif attr2 is None:
+            result = attr1
+
+        # 两个都是np.ndarray，考虑到我们自定义生成operators的方式，这样的情况应该是不存在的，先注释掉
+        # 大哥我错了，不应该注释掉你的，合并字典会用上
+        elif isinstance(attr1, np.ndarray) and isinstance(attr2, np.ndarray):
+            result = np.unique(np.concatenate((attr1, attr2)))
+            result = np.array(result)
+
+        # 同样的，合并字典会用上
+        elif isinstance(attr1, range) and isinstance(attr2, range):
+            result = list(set(list(attr1)) | set(list(attr2)))
+            min_value = min(result)
+            max_value = max(result)
+            result = range(min_value, max_value + 1)
 
         return result
 

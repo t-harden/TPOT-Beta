@@ -13,7 +13,7 @@ training_features, testing_features, training_target, testing_target = \
 
 # Average CV score on the training set was: 0.9019964202120336
 exported_pipeline = make_pipeline(
-    StackingEstimator(estimator=MultinomialNB(alpha=1.0, fit_prior=False)),
+    StackingEstimator(estimator=MultinomialNB(alpha=0.01, fit_prior=True)),
     MultinomialNB(alpha=100.0, fit_prior=False)
 )
 
