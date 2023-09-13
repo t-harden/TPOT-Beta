@@ -79,7 +79,6 @@ from .config.classifier_sparse import classifier_config_sparse
 from .config.classifier_nn import classifier_config_nn
 from .config.classifier_cuml import classifier_config_cuml
 from .config.regressor_cuml import regressor_config_cuml
-from .config.pre_config_test import tpot_pre_config_dict
 
 from .metrics import SCORERS
 from .gp_types import Output_Array
@@ -627,7 +626,7 @@ class TPOTBase(BaseEstimator):
 
             for val in type_values:
                 terminal_name = _type.__name__ + "=" + str(val)
-                print("terminal_name: ", terminal_name)
+                #print("terminal_name: ", terminal_name)
                 self._pset.addTerminal(val, _type, name=terminal_name)
 
     def _add_pre_terminals(self, arg_types):
@@ -683,55 +682,62 @@ class TPOTBase(BaseEstimator):
 
         return make_pipeline_func
 
-    def _get_union(attr1, attr2):
-        # 如果两个属性都是列表，则取并集即可
-        if isinstance(attr1, list) and isinstance(attr2, list):
-            result = list(set(attr1) | set(attr2))
+    def _get_union(self, value1, value2):  #这两个取值的类型只有四种：dict\ndarray\list\range
+                                           #value1是pre_config_dict的二级字典的参数值，value2是config_dict的
 
-        #     # 如果一个是列表，一个是np.ndarray，则将np.ndarray转换为列表，然后取并集
-        #     # 但是考虑到我们自定义生成operators的方式，这样的情况应该是不存在的，先注释掉
-        # elif isinstance(attr1, list) and isinstance(attr2, np.ndarray):
-        #     result = list(set(attr1) | set(attr2.tolist()))
-
-        # 如果一个是np.ndarray，一个是列表，则将np.ndarray转换为列表，然后取并集
-        elif isinstance(attr1, np.ndarray) and isinstance(attr2, list):
-            result = list(set(attr1.tolist()) | set(attr2))
-            # 再把形式转换成attr1的，即ndarray类型
-            result = np.array(result)
-
-        elif isinstance(attr1, range) and isinstance(attr2, list):
-            result = list(set(list(attr1)) | set(attr2))
-            # 将list类型转换成range类型再返回
-            min_value = min(result)
-            max_value = max(result)
-            result = range(min_value, max_value + 1)
-
-        # 合并字典（我直接默认attr1和attr2的字典结构完全相同了），使用递归方法
-        elif isinstance(attr1, dict) and isinstance(attr2, dict):
-            result = {}
-            for key in attr1.keys():
-                # if isinstance(attr1[key],dict):
-                result[key] = _get_union(attr1[key], attr2[key])
-
-
-        # 虽说统计得到的类型中没有None，但是递归时可能遇到这种情况
-        elif attr1 is None or attr1 == [None]:
-            result = attr2
-        elif attr2 is None or attr2 == [None]:
-            result = attr1
-
-        # 两个都是np.ndarray，考虑到我们自定义生成operators的方式，这样的情况应该是不存在的，先注释掉
-        # 大哥我错了，不应该注释掉你的，合并字典会用上
-        elif isinstance(attr1, np.ndarray) and isinstance(attr2, np.ndarray):
-            result = np.unique(np.concatenate((attr1, attr2)))
-            result = np.array(result)
-
-        # 同样的，合并字典会用上
-        elif isinstance(attr1, range) and isinstance(attr2, range):
-            result = list(set(list(attr1)) | set(list(attr2)))
-            min_value = min(result)
-            max_value = max(result)
-            result = range(min_value, max_value + 1)
+        # 当value1或value2为None时，只返回另一个（因为None一般就是默认值，没必要再记录）。
+        # 这里是为了字典递归时用到，正常config_dict的二级字典的key_value不会为None
+        if value1 is None: result = value2
+        elif value2 is None: result = value1
+        # 当value1是字典时，只会与字典合并
+        elif isinstance(value1, dict) and isinstance(value2, dict): #如果两个都是字典，递归合并 Todo:检查是否有考虑不全的地方
+            result = value2
+            for key_value1 in value1.keys():
+                if key_value1 not in result.keys():
+                    result[key_value1] = value1[key_value1]
+                else:
+                    for key_value11 in value1[key_value1].keys(): #遍历二级字典的key
+                        if key_value11 not in result[key_value1].keys():
+                            result[key_value1][key_value11] = value1[key_value1][key_value11]
+                        else:
+                            result[key_value1][key_value11] = self._get_union(value1[key_value1][key_value11], result[key_value1][key_value11]) #递归合并
+        # 当value1是列表时，只会与剩下三种合并
+        elif isinstance(value1, list):
+            if isinstance(value2, list): # 如果value2也是列表，则取并集即可
+                result = list(set(value1) | set(value2))
+            elif isinstance(value2, np.ndarray): # 如果value2是np.ndarray，则将value2转换为列表，然后取并集。最后再转换成value2的ndarray类型
+                result = list(set(value1) | set(value2.tolist()))
+                result = np.array(result)
+            elif isinstance(value2, range): #如果value2是range，先对value2转集合与value1取并，再把list类型转成value2的range类型返回
+                result = list(set(value1) | set(list(value2)))
+                min_value = min(result)
+                max_value = max(result)
+                result = range(min_value, max_value + 1)
+        # 虽然我们的算法框架里value1只会是r
+        # 当value1是ndarray时，只会与剩下三种合并
+        elif isinstance(value1, np.ndarray):
+            if isinstance(value2, list):
+                result = list(set(value1.tolist()) | set(value2))
+            elif isinstance(value2, np.ndarray):
+                result = np.unique(np.concatenate((value1, value2)))
+                result = np.array(result)
+            elif isinstance(value2, range):
+                result = list(set(value1.tolist()) | set(list(value2)))
+                min_value = min(result)
+                max_value = max(result)
+                result = range(min_value, max_value + 1)
+        # 当value1是range时，只会与剩下三种合并
+        elif isinstance(value1, range):
+            if isinstance(value2, list):
+                result = list(set(list(value1)) | set(value2))
+            elif isinstance(value2, np.ndarray):
+                result = list(set(list(value1)) | set(value2.tolist()))
+                result = np.array(result)
+            elif isinstance(value2, range):
+                result = list(set(list(value1)) | set(list(value2)))
+                min_value = min(result)
+                max_value = max(result)
+                result = range(min_value, max_value + 1)
 
         return result
 
@@ -755,15 +761,19 @@ class TPOTBase(BaseEstimator):
             self.pre_operators = []
             self.pre_arguments = []
             # 合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
-            for key in sorted(self.pre_config_dict.keys()):
-                if key not in self._config_dict.keys():
-                    self._config_dict[key] = self.pre_config_dict[key]
+            for key_operator in sorted(self.pre_config_dict.keys()): #遍历一级字典的key
+                if key_operator not in self._config_dict.keys():
+                    self._config_dict[key_operator] = self.pre_config_dict[key_operator]
                 else:
-                    for attr in self._config_dict[key].keys():
-                        self._config_dict[key][attr] = self._get_union(self._config_dict[key][attr],self.pre_config_dict[key][attr])
+                    for key_attr in self.pre_config_dict[key_operator].keys(): #遍历二级字典的key
+                        if key_attr not in self._config_dict[key_operator].keys():
+                            self._config_dict[key_operator][key_attr] = self.pre_config_dict[key_operator][key_attr]
+                        else:
+                            self._config_dict[key_operator][key_attr] = self._get_union(self.pre_config_dict[key_operator][key_attr], self._config_dict[key_operator][key_attr])
+
                 op_class, arg_types = TPOTOperatorClassFactory(
-                    key,
-                    self.pre_config_dict[key],
+                    key_operator,
+                    self.pre_config_dict[key_operator],
                     BaseClass=Operator,
                     ArgBaseClass=ARGType,
                     verbose=self.verbosity,
@@ -773,10 +783,10 @@ class TPOTBase(BaseEstimator):
                     self.pre_arguments += arg_types
 
             "再根据更新后的_config_dict构造self.operators"
-            for key in sorted(self._config_dict.keys()):
+            for key_operator in sorted(self._config_dict.keys()):
                 op_class, arg_types = TPOTOperatorClassFactory(
-                    key,
-                    self._config_dict[key],
+                    key_operator,
+                    self._config_dict[key_operator],
                     BaseClass=Operator,
                     ArgBaseClass=ARGType,
                     verbose=self.verbosity,
@@ -805,10 +815,10 @@ class TPOTBase(BaseEstimator):
             # generations or previous runs
             self.evaluated_individuals_ = {}
 
-            print(len(self._pset.primitives), "self._pset.primitives:", self._pset.primitives)
-            print(len(self._pset.terminals), "self._pset.terminals:", self._pset.terminals)
-            print(len(self._pre_pset.primitives), "self._pre_pset.primitives:", self._pre_pset.primitives)
-            print(len(self._pre_pset.terminals), "self._pre_pset.terminals:", self._pre_pset.terminals)
+            # print(len(self._pset.primitives), "self._pset.primitives:", self._pset.primitives)
+            # print(len(self._pset.terminals), "self._pset.terminals:", self._pset.terminals)
+            # print(len(self._pre_pset.primitives), "self._pre_pset.primitives:", self._pre_pset.primitives)
+            # print(len(self._pre_pset.terminals), "self._pre_pset.terminals:", self._pre_pset.terminals)
 
         self._optimized_pipeline = None
         self._optimized_pipeline_score = None
