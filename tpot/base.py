@@ -715,9 +715,9 @@ class TPOTBase(BaseEstimator):
 
 
         # 虽说统计得到的类型中没有None，但是递归时可能遇到这种情况
-        elif attr1 is None:
+        elif attr1 is None or attr1 == [None]:
             result = attr2
-        elif attr2 is None:
+        elif attr2 is None or attr2 == [None]:
             result = attr1
 
         # 两个都是np.ndarray，考虑到我们自定义生成operators的方式，这样的情况应该是不存在的，先注释掉
