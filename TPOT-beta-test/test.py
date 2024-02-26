@@ -2,6 +2,7 @@ from tpot import TPOTClassifier
 from sklearn.datasets import load_digits
 from sklearn.model_selection import train_test_split
 import numpy as np
+import pickle
 
 digits = load_digits()
 features = digits.data
@@ -132,7 +133,29 @@ tpot_config = {
     #     }
     # },
 }
-tpot = TPOTClassifier(generations=2, population_size=20, verbosity=2, config_dict=None, pre_config_dict=tpot_pre_config_dict)
+#读取进化的元数据dict_task_evoldata_20230130[task_id] = [[bootstrap1的进化结果],..., [bootstrap10的进化结果]]" \
+#每个bootstrap的进化结果为列表[进化时间, 进化代数, UniformTPipeline列表[元组(sklearn pipeline, str pipeline, internal_cv_score)]]"
+with open('/Users/yanggu/Documents/博士/科研/流程推荐/实验/机器学习工作流/AutoML-Systems/Surrogate4AutoML/1CollectMetadata/EvolResult/light_20230130/dict_task_evoldata_20230130_light.pkl', 'rb') as f:
+    dict_task_evoldata_20230130_light = pickle.load(f)
+
+print(list(np.arange(0.05, 1.01, 0.05)))
+# exit
+
+i = 0
+customized_pre_pop = []
+for task_id in dict_task_evoldata_20230130_light:
+    i += 1
+    print("---", i, task_id, "---")
+    UniformTPipeline = dict_task_evoldata_20230130_light[task_id][9][2]
+    for tup in UniformTPipeline[0:10]:
+        customized_pre_pop.append(tup[1])
+
+
+#用初始种群
+tpot = TPOTClassifier(generations=3, population_size=1000, verbosity=2, config_dict=None, pre_config_dict=None, customized_pre_population=customized_pre_pop)
+
 tpot.fit(X_train, y_train)
 print(tpot.score(X_test, y_test))
+print("最优sklearn pipeline：", type(tpot.fitted_pipeline_), tpot.fitted_pipeline_)
+print("最优deap pipeline：", type(tpot._optimized_pipeline), tpot._optimized_pipeline)
 tpot.export('tpot_digits_pipeline_betatest.py')

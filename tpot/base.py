@@ -120,6 +120,7 @@ class TPOTBase(BaseEstimator):
         random_state=None,
 
         pre_config_dict=None,
+        customized_pre_population = None,
 
         config_dict=None,
         template=None,
@@ -315,6 +316,7 @@ class TPOTBase(BaseEstimator):
         self.log_file = log_file
 
         self.pre_config_dict = pre_config_dict
+        self.customized_pre_population = customized_pre_population
 
     def _setup_template(self, template):
         self.template = template
@@ -649,14 +651,20 @@ class TPOTBase(BaseEstimator):
             )
 
         self._toolbox = base.Toolbox()
+        pset_value = self._pre_pset if self.pre_config_dict else self._pset #需要根据是否有初始配置空间来给下面个体expr注册函数里的pset和ret_types赋值
+        ret_types_value = self.pre_ret_types if self.pre_config_dict else self.ret_types
         self._toolbox.register(
-            "expr", self._gen_grow_safe, pset=self._pre_pset, ret_types=self.pre_ret_types, min_=self._min, max_=self._max
+            "expr", self._gen_grow_safe, pset=pset_value, ret_types=ret_types_value, min_=self._min, max_=self._max
         )
         self._toolbox.register(
             "individual", tools.initIterate, creator.Individual, self._toolbox.expr
         )
         self._toolbox.register(
             "population", tools.initRepeat, list, self._toolbox.individual
+        )
+        # 注册一个自定义的种群生成函数
+        self._toolbox.register(
+            "population_custom", self._initPopulation_custom, customized_pre_population = self.customized_pre_population
         )
         self._toolbox.register("compile", self._compile_to_sklearn)
         self._toolbox.register("select", tools.selNSGA2)
@@ -760,27 +768,28 @@ class TPOTBase(BaseEstimator):
             "仿照构造self.operators的方法再构造一个self.pre_operators，并且更新_config_dict（用合并的字典）"
             self.pre_operators = []
             self.pre_arguments = []
-            # 合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
-            for key_operator in sorted(self.pre_config_dict.keys()): #遍历一级字典的key
-                if key_operator not in self._config_dict.keys():
-                    self._config_dict[key_operator] = self.pre_config_dict[key_operator]
-                else:
-                    for key_attr in self.pre_config_dict[key_operator].keys(): #遍历二级字典的key
-                        if key_attr not in self._config_dict[key_operator].keys():
-                            self._config_dict[key_operator][key_attr] = self.pre_config_dict[key_operator][key_attr]
-                        else:
-                            self._config_dict[key_operator][key_attr] = self._get_union(self.pre_config_dict[key_operator][key_attr], self._config_dict[key_operator][key_attr])
+            if self.pre_config_dict: #如果self.pre_config_dict不空
+                # 合并pre_operators和operators，并注意不能有重复（否则会报错duplicate operators)
+                for key_operator in sorted(self.pre_config_dict.keys()): #遍历一级字典的key
+                    if key_operator not in self._config_dict.keys():
+                        self._config_dict[key_operator] = self.pre_config_dict[key_operator]
+                    else:
+                        for key_attr in self.pre_config_dict[key_operator].keys(): #遍历二级字典的key
+                            if key_attr not in self._config_dict[key_operator].keys():
+                                self._config_dict[key_operator][key_attr] = self.pre_config_dict[key_operator][key_attr]
+                            else:
+                                self._config_dict[key_operator][key_attr] = self._get_union(self.pre_config_dict[key_operator][key_attr], self._config_dict[key_operator][key_attr])
 
-                op_class, arg_types = TPOTOperatorClassFactory(
-                    key_operator,
-                    self.pre_config_dict[key_operator],
-                    BaseClass=Operator,
-                    ArgBaseClass=ARGType,
-                    verbose=self.verbosity,
-                )
-                if op_class:
-                    self.pre_operators.append(op_class)
-                    self.pre_arguments += arg_types
+                    op_class, arg_types = TPOTOperatorClassFactory(
+                        key_operator,
+                        self.pre_config_dict[key_operator],
+                        BaseClass=Operator,
+                        ArgBaseClass=ARGType,
+                        verbose=self.verbosity,
+                    )
+                    if op_class:
+                        self.pre_operators.append(op_class)
+                        self.pre_arguments += arg_types
 
             "再根据更新后的_config_dict构造self.operators"
             for key_operator in sorted(self._config_dict.keys()):
@@ -791,7 +800,7 @@ class TPOTBase(BaseEstimator):
                     ArgBaseClass=ARGType,
                     verbose=self.verbosity,
                 )
-                if op_class :
+                if op_class:
                     self.operators.append(op_class)
                     self.arguments += arg_types
 
@@ -805,12 +814,19 @@ class TPOTBase(BaseEstimator):
             }
 
             #ToDo:这里是测试！注意！（以后开发也要有这个意识）
-            print("###", self._config_dict)
-            print('---', self.pre_config_dict)
+            # print("###", self._config_dict)
+            # print('---', self.pre_config_dict)
 
-            self._setup_pre_pset()
+            if self.pre_config_dict:
+                self._setup_pre_pset()
             self._setup_pset()
             self._setup_toolbox()
+            # print("**Print pset**")
+            # print(type(self._pset), self._pset)
+            # type_ = self._pset.ret
+            # print(self._pset.primitives[type_])
+            # print(self._pset.terminals[type_])
+            # print("****")
             # Dictionary of individuals that have already been evaluated in previous
             # generations or previous runs
             self.evaluated_individuals_ = {}
@@ -923,6 +939,33 @@ class TPOTBase(BaseEstimator):
         """
         self._fit_init()
         features, target = self._check_dataset(features, target, sample_weight)
+        # expr1 = self._toolbox.expr()
+        # individual1 = self._toolbox.individual()
+        # population1 = self._toolbox.population(n=2)
+        # print("**Print expr, individual and population**")
+        # print("expr:", type(expr1), expr1)
+        # print("individual:", type(individual1), individual1)
+        # print("population:", type(population1), type(population1[0]), population1)
+        # print("*****")
+        # exit()
+        #
+        # pipeline_string = (
+        #     'KNeighborsClassifier('
+        #     'input_matrix, '
+        #     'KNeighborsClassifier__n_neighbors=10, '
+        #     'KNeighborsClassifier__p=1, '
+        #     'KNeighborsClassifier__weights=uniform'
+        #     ')'
+        # )
+        #pipeline_string = "KNeighborsClassifier(input_matrix, KNeighborsClassifier__n_neighbors=10, KNeighborsClassifier__p=1, KNeighborsClassifier__weights=uniform)"
+        #pipeline_string = "Pipeline(steps=[('gradientboostingclassifier',GradientBoostingClassifier(learning_rate=0.5, max_depth=9,max_features=0.55))])"
+        # pipeline_string = "StackingEstimator(estimator=XGBClassifier(base_score=None, booster=None,callbacks=None))"
+        # optimized_pipeline = creator.Individual.from_string(pipeline_string, self._pset)
+        # print("-----test_compile------")
+        # print(optimized_pipeline)
+        # print(type(optimized_pipeline))
+        # print("-----test_compile_over------")
+        # exit()
 
         self._init_pretest(features, target)
 
@@ -962,7 +1005,17 @@ class TPOTBase(BaseEstimator):
 
         # assign population, self._pop can only be not None if warm_start is enabled
         if not self._pop:
-            self._pop = self._toolbox.population(n=self.population_size)
+            if not self.customized_pre_population: #如果self.customized_pre_population为None，仍按原来的方式生成初始种群
+                self._pop = self._toolbox.population(n=self.population_size)
+                # print(self._pop)
+                print("初始种群个体数：", len(self._pop))
+                print("原方式生成初始种群成功！")
+            else:
+                self._pop = self._toolbox.population_custom(customized_pre_population=self.customized_pre_population)
+                # print(self._pop)
+                print("初始种群个体数：", len(self._pop))
+                print("新方式生成初始种群成功！")
+        print("@@@每代种群个体数：", self.population_size)
 
         def pareto_eq(ind1, ind2):
             """Determine whether two individuals are equal on the Pareto front.
@@ -1187,6 +1240,10 @@ class TPOTBase(BaseEstimator):
                 "passed the data to TPOT correctly."
             )
         else:
+            # print("-----Print related information of self._optimized_pipeline-----")
+            # print(self._optimized_pipeline)
+            # print("适应度值：", self._optimized_pipeline.fitness.values)
+            # print("-----Print Over-----")
             self.fitted_pipeline_ = self._toolbox.compile(expr=self._optimized_pipeline)
 
             with warnings.catch_warnings():
@@ -2222,7 +2279,28 @@ class TPOTBase(BaseEstimator):
                 expr.append(prim)
                 for arg in reversed(prim.args):
                     stack.append((depth + 1, arg))
+        # print("*****")
+        # print(expr)
+        # exit()
+        # print("*****")
         return expr
+
+    def _initPopulation_custom(self, customized_pre_population): # customized_pre_population里存的是deap pipeline的字符串形式
+        iniPop = [] #保持和非自定义的初始种群一样，用列表存储类型为<class 'deap.creator.Individual'>的pipeline个体
+        for deap_pipeline_str in customized_pre_population:
+            deap_pipeline = creator.Individual.from_string(deap_pipeline_str, self._pset) #把用户输入的每个deap pipeline str转换成deap pipeline
+            iniPop.append(deap_pipeline)
+        "加了一层混合构成初始种群的判断" #ToDO：更标准一点应该用户输入的时候引入一个参数，表明是自定义or随机or混合，这里为了方便就暂时没写了
+        if len(iniPop) < self.population_size:
+            for _ in range(self.population_size - len(iniPop)):
+                individual1 = self._toolbox.individual()
+                iniPop.append(individual1)
+            print(len(customized_pre_population), "个自定义个体+", self.population_size - len(customized_pre_population), "个随机个体混合构成初始种群！")
+        else:
+            print(len(customized_pre_population), "个自定义个体单独构成初始种群！")
+            self.population_size = len(customized_pre_population) #需要更新一下种群个数，防止用户输入的size小于自定义的种群
+        return iniPop
+
 
 
     @property
