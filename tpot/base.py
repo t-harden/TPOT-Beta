@@ -87,7 +87,11 @@ from .gp_deap import (
     mutNodeReplacement,
     _wrapped_cross_val_score,
     cxOnePoint,
+    score_by_surrogate,
 )
+
+import torch
+from .surrogate_models.SurrogateNetDef import SurrogateNet, SurrogateNet_interaction, SurrogateNet_GRU, SurrogateNet_Transformer
 
 try:
     from imblearn.pipeline import make_pipeline as make_imblearn_pipeline
@@ -132,6 +136,9 @@ class TPOTBase(BaseEstimator):
         verbosity=0,
         disable_update_check=False,
         log_file=None,
+
+        surrogate_model=None,
+        dataset_embed=None,
     ):
         """Set up the genetic programming algorithm for pipeline optimization.
 
@@ -317,6 +324,9 @@ class TPOTBase(BaseEstimator):
 
         self.pre_config_dict = pre_config_dict
         self.customized_pre_population = customized_pre_population
+
+        self.surrogate_model = surrogate_model #字符串，代理模型名称
+        self.dataset_embed = dataset_embed #用于拟合的数据集的embedding
 
     def _setup_template(self, template):
         self.template = template
@@ -939,6 +949,22 @@ class TPOTBase(BaseEstimator):
         """
         self._fit_init()
         features, target = self._check_dataset(features, target, sample_weight)
+        if self.surrogate_model is not None:   #如果使用代理模型，在进化一开始就加载，不用每次evaluate都加载了
+            ''' 定义网络 '''
+            # SuModel = SurrogateNet(da_dim=111, op_dim=768, embed_size=100, DaAttention_factor=6,
+            #                      n_hidden_1=512, n_hidden_2=512, n_hidden_3=256, n_hidden_4=256, out_dim=1)
+            # SuModel = SurrogateNet_interaction(da_dim=111, op_dim=768, embed_size=100, DaAttention_factor=6,
+            #                                  n_hidden_1=512, n_hidden_2=512, n_hidden_3=256, n_hidden_4=256, out_dim=1,
+            #                                  BiInteraction=False)
+            SuModel = SurrogateNet_GRU(da_dim=111, op_dim=768, embed_size=100, DaAttention_factor=6,
+                                             n_hidden_1=512, n_hidden_2=512, n_hidden_3=256, n_hidden_4=256, out_dim=1, BiDirection=True)
+            # SuModel = SurrogateNet_Transformer(da_dim=111, op_dim=768, embed_size=100, DaAttention_factor=6,
+            #                          n_hidden_1=512, n_hidden_2=512, n_hidden_3=256, n_hidden_4=256, out_dim=1, transformerout_avg=True)
+            " 加载训练好的代理网络 "
+            SuModel.load_state_dict(torch.load("/Users/yanggu/Documents/博士/科研/流程推荐/实验/机器学习工作流/TPOT-Beta/tpot/surrogate_models/" + self.surrogate_model, map_location=torch.device('cpu')))
+            SuModel.eval()
+        else:
+            SuModel = None
         # expr1 = self._toolbox.expr()
         # individual1 = self._toolbox.individual()
         # population1 = self._toolbox.population(n=2)
@@ -1001,6 +1027,7 @@ class TPOTBase(BaseEstimator):
             target=target,
             sample_weight=sample_weight,
             groups=groups,
+            suModel=SuModel,
         )
 
         # assign population, self._pop can only be not None if warm_start is enabled
@@ -1728,7 +1755,7 @@ class TPOTBase(BaseEstimator):
         return stats
 
     def _evaluate_individuals(
-        self, population, features, target, sample_weight=None, groups=None
+        self, population, features, target, sample_weight=None, groups=None, suModel=None
     ):
         """Determine the fit of the provided individuals.
 
@@ -1767,20 +1794,30 @@ class TPOTBase(BaseEstimator):
             stats_dicts,
         ) = self._preprocess_individuals(individuals)
 
-        cv = check_cv(self.cv, target, classifier=self.classification)
+        if self.surrogate_model is not None:   #如果使用代理模型替代交叉验证
+            " 定义partial函数，下面调用时少一些参数"
+            partial_score_by_surrogate = partial(
+                score_by_surrogate,
+                dataset_embed=self.dataset_embed,
+                suModel=suModel,
+                timeout=max(int(self.max_eval_time_mins * 60), 1),
+                use_dask=self.use_dask,
+            )
+        else:  #否则还使用原来的交叉验证方法
+            cv = check_cv(self.cv, target, classifier=self.classification)
 
-        # Make the partial function that will be called below
-        partial_wrapped_cross_val_score = partial(
-            _wrapped_cross_val_score,
-            features=features,
-            target=target,
-            cv=cv,
-            scoring_function=self.scoring_function,
-            sample_weight=sample_weight,
-            groups=groups,
-            timeout=max(int(self.max_eval_time_mins * 60), 1),
-            use_dask=self.use_dask,
-        )
+            # Make the partial function that will be called below
+            partial_wrapped_cross_val_score = partial(
+                _wrapped_cross_val_score,
+                features=features,
+                target=target,
+                cv=cv,
+                scoring_function=self.scoring_function,
+                sample_weight=sample_weight,
+                groups=groups,
+                timeout=max(int(self.max_eval_time_mins * 60), 1),
+                use_dask=self.use_dask,
+            )
 
         result_score_list = []
 
@@ -1791,9 +1828,12 @@ class TPOTBase(BaseEstimator):
             if self._n_jobs == 1 and not self.use_dask:
                 for sklearn_pipeline in sklearn_pipeline_list:
                     self._stop_by_max_time_mins()
-                    val = partial_wrapped_cross_val_score(
-                        sklearn_pipeline=sklearn_pipeline
-                    )
+                    if self.surrogate_model is not None: #如果使用代理模型替代交叉验证
+                        val = partial_score_by_surrogate(sklearn_pipeline=sklearn_pipeline)
+                    else:
+                        val = partial_wrapped_cross_val_score(
+                            sklearn_pipeline=sklearn_pipeline
+                        )
                     result_score_list = self._update_val(val, result_score_list)
             else:
                 # chunk size for pbar update
@@ -1807,15 +1847,22 @@ class TPOTBase(BaseEstimator):
                     self._stop_by_max_time_mins()
                     if self.use_dask:
                         import dask
-
-                        tmp_result_scores = [
-                            partial_wrapped_cross_val_score(
-                                sklearn_pipeline=sklearn_pipeline
-                            )
-                            for sklearn_pipeline in sklearn_pipeline_list[
-                                chunk_idx : chunk_idx + chunk_size
+                        if self.surrogate_model is not None: #如果使用代理模型替代交叉验证
+                            tmp_result_scores = [
+                                partial_score_by_surrogate(sklearn_pipeline=sklearn_pipeline)
+                                for sklearn_pipeline in sklearn_pipeline_list[
+                                    chunk_idx : chunk_idx + chunk_size
+                                ]
                             ]
-                        ]
+                        else:
+                            tmp_result_scores = [
+                                partial_wrapped_cross_val_score(
+                                    sklearn_pipeline=sklearn_pipeline
+                                )
+                                for sklearn_pipeline in sklearn_pipeline_list[
+                                    chunk_idx : chunk_idx + chunk_size
+                                ]
+                            ]
 
                         
                         with warnings.catch_warnings():
@@ -1827,14 +1874,22 @@ class TPOTBase(BaseEstimator):
                         parallel = Parallel(
                             n_jobs=self._n_jobs, verbose=0, pre_dispatch="2*n_jobs"
                         )
-                        tmp_result_scores = parallel(
-                            delayed(partial_wrapped_cross_val_score)(
-                                sklearn_pipeline=sklearn_pipeline
+                        if self.surrogate_model is not None: #如果使用代理模型替代交叉验证
+                            tmp_result_scores = parallel(
+                                delayed(partial_score_by_surrogate)(sklearn_pipeline=sklearn_pipeline)
+                                for sklearn_pipeline in sklearn_pipeline_list[
+                                                        chunk_idx: chunk_idx + chunk_size
+                                                        ]
                             )
-                            for sklearn_pipeline in sklearn_pipeline_list[
-                                chunk_idx : chunk_idx + chunk_size
-                            ]
-                        )
+                        else:
+                            tmp_result_scores = parallel(
+                                delayed(partial_wrapped_cross_val_score)(
+                                    sklearn_pipeline=sklearn_pipeline
+                                )
+                                for sklearn_pipeline in sklearn_pipeline_list[
+                                    chunk_idx : chunk_idx + chunk_size
+                                ]
+                            )
                     # update pbar
                     for val in tmp_result_scores:
                         result_score_list = self._update_val(val, result_score_list)

@@ -22,6 +22,7 @@ You should have received a copy of the GNU Lesser General Public
 License along with TPOT. If not, see <http://www.gnu.org/licenses/>.
 
 """
+import os
 
 import numpy as np
 from deap import tools, gp
@@ -35,6 +36,9 @@ from sklearn.base import clone
 from collections import defaultdict
 import warnings
 from stopit import threading_timeoutable, TimeoutException
+
+import pickle
+import torch
 
 
 def pick_two_individuals_eligible_for_crossover(population):
@@ -389,6 +393,84 @@ def mutNodeReplacement(individual, pset):
 
     return individual,
 
+#ToDO:看看在哪里读这两个字典更合适
+print(os.getcwd())
+" 读取light版的operator字典，key为没有前缀的operator名，key_value为长度为3的列表，第一位是operator的类型，第二位是超参数字典，第三位是组合好的字符串形式的sklearn operator列表（所有超参数都有值，包括默认值）"
+with open('/Users/yanggu/Documents/博士/科研/流程推荐/实验/机器学习工作流/TPOT-Beta/tpot/surrogate_models/related_data/dict_operator_light.pkl', 'rb') as f:
+    dict_operator_light = pickle.load(f)
+print(len(dict_operator_light))
+print(dict_operator_light['Binarizer'])
+
+" 读取带超参数的operator预嵌入字典，key为带参数的operator字符串，key_value为其对应的numpy向量 "
+with open('/Users/yanggu/Documents/博士/科研/流程推荐/实验/机器学习工作流/TPOT-Beta/tpot/surrogate_models/related_data/dict_operator_light_PreEmbedding.pkl', 'rb') as f:
+    dict_operator_light_PreEmbedding = pickle.load(f)
+print("共有多少种不同的operator超参数组合：", len(dict_operator_light_PreEmbedding))
+print(dict_operator_light_PreEmbedding['Binarizer(threshold=0.30000000000000004)'].shape)
+
+def ExtractOpEmbed(pipe):  #从sklearn pipeline里提取出三个operator的字符串，再转成嵌入表示
+    # 遍历 Pipeline 的每个步骤
+    op_str_list = []
+    for step_name, step_obj in pipe.named_steps.items():
+        # 获取当前步骤的operator名称
+        step_type_str = type(step_obj).__name__
+        # 获取当前步骤的operator参数字典
+        step_params_dict = step_obj.get_params()
+        light_params_dict = dict_operator_light[step_type_str][1]  # light字典里该operator的参数字典
+
+        if len(light_params_dict) == 0:
+            op_str_list.append(step_type_str + "()")
+        else:
+            op_str = step_type_str + "("
+            temp_list = sorted(light_params_dict.keys())
+            # print(temp_list)
+            for hparam in temp_list[0:-1]:
+                if hparam == 'score_func':  # 对SelectFwe和SelectPercentile的超参数'score_func'特殊处理
+                    value = 'f_classif'
+                else:
+                    value = step_params_dict[hparam]
+                value = "'" + value + "'" if isinstance(value, str) else str(value)  # 为了使本身为字符串的超参数值仍然带引号
+                temp_str = hparam + '=' + value + ', '
+                op_str += temp_str
+            if temp_list[-1] == 'score_func':
+                value = 'f_classif'
+            else:
+                value = step_params_dict[temp_list[-1]]
+            value = "'" + value + "'" if isinstance(value, str) else str(value)
+            op_str = op_str + temp_list[-1] + '=' + value + ")"
+            op_str_list.append(op_str)
+        # print(op_str_list)
+    op1_str, op2_str, op3_str = op_str_list[0], op_str_list[1], op_str_list[2]
+    op1_embed, op2_embed, op3_embed = dict_operator_light_PreEmbedding[op1_str], dict_operator_light_PreEmbedding[op2_str], dict_operator_light_PreEmbedding[op3_str]
+
+    return op1_embed, op2_embed, op3_embed
+
+@threading_timeoutable(default="Timeout")
+def score_by_surrogate(sklearn_pipeline, dataset_embed, suModel, use_dask=False):
+
+    if use_dask: #ToDO:后续完善use_dask的情况
+        import dask  # noqa
+    else:
+        try:
+            "dataset嵌入"
+            da_embed = dataset_embed[None, ...]  # 很重要！增加一个维度，因为SurrogateNet的数据集输入有两个维度，第一维是batch-size。这里只有一个数据但也要加一个维度
+            da_embed = torch.from_numpy(da_embed).float()  # numpy转torch
+            "operators嵌入"
+            op1_embed, op2_embed, op3_embed = ExtractOpEmbed(sklearn_pipeline)  # 从sklearn pipeline里提取出三个operator的字符串，再转成嵌入表示
+            ops_embed = np.vstack([op1_embed, op2_embed, op3_embed])  # 把三个operator向量(768,)拼成(3,768)的数组
+            ops_embed = ops_embed[None, ...]  # 同样增加一个维度
+            ops_embed = torch.from_numpy(ops_embed).float()  # numpy转torch
+            "代理网络预测"
+            out = suModel(da_embed, ops_embed)
+            out = out.detach().numpy().tolist()  # torch转numpy再转list，变成[[0.904032289981842]]
+            predicted_cv_score = out[0][0]  # 取数值
+            if not (0 <= predicted_cv_score <= 1):
+                raise ValueError("Incorrect output format from Surrogate's prediction!")
+
+            return predicted_cv_score
+        except TimeoutException:
+            return "Timeout"
+        except Exception as e:
+            return -float('inf')
 
 @threading_timeoutable(default="Timeout")
 def _wrapped_cross_val_score(sklearn_pipeline, features, target,

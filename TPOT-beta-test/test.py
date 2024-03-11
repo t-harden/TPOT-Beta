@@ -3,6 +3,7 @@ from sklearn.datasets import load_digits
 from sklearn.model_selection import train_test_split
 import numpy as np
 import pickle
+import time
 
 digits = load_digits()
 features = digits.data
@@ -141,21 +142,38 @@ with open('/Users/yanggu/Documents/博士/科研/流程推荐/实验/机器学�
 print(list(np.arange(0.05, 1.01, 0.05)))
 # exit
 
+"构造初始种群"
 i = 0
 customized_pre_pop = []
 for task_id in dict_task_evoldata_20230130_light:
     i += 1
     print("---", i, task_id, "---")
     UniformTPipeline = dict_task_evoldata_20230130_light[task_id][9][2]
-    for tup in UniformTPipeline[0:10]:
+    for tup in UniformTPipeline[0:1]:
         customized_pre_pop.append(tup[1])
+    if i == 5: break
 
+"数据集嵌入"
+# 读取数据集信息和Bootstrap字典dict_task_data[task_id]=[task,dataset,metafe,[bootstrapped_line_numbers]]
+with open('/Users/yanggu/Documents/博士/科研/流程推荐/实验/机器学习工作流/AutoML-Systems/Surrogate4AutoML/1CollectMetadata/dict_task_data.pkl', 'rb') as f:
+    dict_task_data = pickle.load(f)
+print(len(dict_task_data))  # 68个数据集
+
+task_id = 3
+X, y = dict_task_data[task_id][0].get_X_and_y()
+dataset_embed = dict_task_data[task_id][2]  # (111,)的numpy数组
+dataset_embed = np.nan_to_num(dataset_embed)  # 元特征里所有为nan的数被替换为0
 
 #用初始种群
-tpot = TPOTClassifier(generations=3, population_size=1000, verbosity=2, config_dict=None, pre_config_dict=None, customized_pre_population=customized_pre_pop)
+tpot = TPOTClassifier(generations=3, population_size=5, verbosity=2, n_jobs=1, random_state=42, config_dict='TPOT light', template='Selector-Transformer-Classifier',
+                      pre_config_dict=None, customized_pre_population=None,
+                      surrogate_model='SurrogateNet_model_20240214da与ops注意力+普通双向双层GRU.pt',
+                      dataset_embed=dataset_embed)
 
-tpot.fit(X_train, y_train)
-print(tpot.score(X_test, y_test))
+st_time = time.time()
+tpot.fit(X, y)
+print("耗时：", time.time()-st_time)
+print(tpot.score(X, y))
 print("最优sklearn pipeline：", type(tpot.fitted_pipeline_), tpot.fitted_pipeline_)
 print("最优deap pipeline：", type(tpot._optimized_pipeline), tpot._optimized_pipeline)
 tpot.export('tpot_digits_pipeline_betatest.py')
